@@ -165,7 +165,7 @@ public final class AudioNavigator: Navigator, Configurable, AudioSessionUser, Lo
             // As `automaticallyWaitsToMinimizeStalling` is disabled, the
             // player reports `.playing` even when it is stalled on an empty
             // buffer waiting for data.
-            return .loadingExpand
+            return .loading
         }
         return state
     }
