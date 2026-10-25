@@ -2,32 +2,101 @@
 
 All notable changes to this project will be documented in this file. Take a look at [the migration guide](docs/Migration%20Guide.md) to upgrade between two major versions.
 
+
 ## [Unreleased]
 
+### Changed
+
+#### Shared
+
+* Converting a `Link` to a `Locator` is now synchronous: `await publication.locate(link)` becomes `publication.locator(for: link)`. The logic moved to `Manifest`, so it is also available as `manifest.locator(for: link)` without a `Publication`.
+
+#### LCP
+
+* Opening an LCP publication is no longer delayed by the CRL used to validate its license. The CRL is now downloaded when creating the `LCPService`, and an expired one is refreshed in the background instead of making the user wait for the response.
+
+### Fixed
+
+#### Navigator
+
+* [#121](https://github.com/readium/swift-toolkit/issues/121) HTML `<audio>` and `<video>` elements are now paused when the resource moves off-screen in the EPUB navigator, rather than continuing to play in the background.
+
+#### LCP
+
+* The CRL used to validate LCP licenses is now checked to be a genuine X.509 CRL before being cached. Networks with a captive portal (e.g. on a plane) could return their login page with a `200 OK` status, which was then cached for seven days and prevented opening LCP publications. An invalid CRL cached by a previous version is now ignored instead of waiting for its expiration.
+* [#579](https://github.com/readium/swift-toolkit/issues/579) Streamed LCP audiobooks now start playing almost immediately. Resources encrypted with AES-CBC are decrypted and served in chunks, instead of being fully downloaded and decrypted upfront.
+
+
+## [4.0.0-alpha.1] - 2026-08-14
+
 ### Added
+
+#### Shared
+
+* Content elements now expose `accessibleName`, `accessibleDescription` and `extendedDescription` attributes, computed following a subset of [the W3C accessible name computation](https://www.w3.org/TR/accname-1.2) and [Best Practices for Implementing Extended Descriptions in EPUB](https://daisy.github.io/transitiontoepub/best-practices/extended-desc/ExtendedDescriptionsBestPractices.html). 
+* The HTML content iterator now emits inline `<svg>` elements as `SVGContentElement`, with a caption from the enclosing figure's `figcaption`.
+* `AudioContentElement` and `VideoContentElement` now expose a `caption` property, filled from the enclosing figure's `figcaption` like images and SVGs already were.
+
+### Changed
+
+* The toolkit is migrated to Swift 6 with strict concurrency checking. All packages compile in the Swift 6 language mode. See [the migration guide](docs/Migration%20Guide.md).
+    * The toolkit adopts the `NonisolatedNonsendingByDefault` (SE-0461), `InferIsolatedConformances` and `MemberImportVisibility` upcoming Swift features.
+
+#### Shared
+
+* OPDS models (`Feed`, `Group`, `Facet`, `OpdsMetadata`) are now structs with value semantics.
+* `Publication`, `Resource`, `Container` and related types are now `Sendable`. Custom implementations of `Resource`, `Container`, `HTTPClient` or `PublicationService` must be `Sendable` too.
+* `Resource.stream()` now cooperates with task cancellation: the built-in resources fail with `ReadError.cancelled` when the surrounding task is cancelled, and custom implementations are expected to do the same.
+* `ImageContentElement.caption` and `SVGContentElement.caption` are now strictly the text of the enclosing figure's `figcaption`. Other sources (such as `alt`) contribute to `accessibleName` instead.
+* Audio and video content elements now expose accessibility attributes, so the text-to-speech may start speaking their labels.
+
+#### Navigator
+
+* The `Navigator` and `VisualNavigator` protocols and their delegates are now isolated to the main actor.
+
+#### LCP
+
+* `LCPService.init` now requires an explicit `deviceName` parameter. We recommend passing `UIDevice.current.name`. See [the migration guide](docs/Migration%20Guide.md).
+* `LCPDialogAuthentication` no longer takes a `sender` view controller. It now presents its passphrase dialog through a new `LCPDialogAuthenticationDelegate` that you implement and retain for the lifetime of the authentication. See [the Readium LCP guide](docs/Guides/Readium%20LCP.md) and [the migration guide](docs/Migration%20Guide.md).
+
+### Removed
+
+* The deprecated `ReadiumAdapterGCDWebServer` and `ReadiumAdapterLCPSQLite` adapter packages have been removed.
+* The `ReadiumInternal` package has been removed. Its utilities were internal helpers and are now folded into `ReadiumShared` with `package` visibility. If you imported `ReadiumInternal` directly, remove the import.
+
+
+<!-- ## [Unreleased] -->
+
+## [3.11.0] - 2026-07-17
+
+### Added
+
+#### Navigator
+
+* Added the `AudioSessionManaging` protocol, letting apps provide their own audio session manager instead of the built-in `AudioSession` (contributed by [@svenmeyers89](https://github.com/readium/swift-toolkit/pull/856)).
 
 #### LCP
 
 * `LCPService` has a new `addPassphrase(_:isHashed:userID:provider:)` method to store a passphrase candidate in the repository without opening a license first. Useful to preload a passphrase ahead of time (e.g. from a catalog).
+* `LCPClient` has a new `getSupportedLCPProfileURIs()` requirement, letting the toolkit report `LCPError.licenseProfileNotSupported` based on the profiles the embedded liblcp actually supports. Update your `LCPClient` facade to forward `R2LCPClient.getSupportedLCPProfileURIs()` (a default implementation is provided for backward compatibility).
+
+### Changed
+
+#### LCP
+
+* The auto-generated LCP device ID is now stored in the Keychain instead of `UserDefaults`, so it survives an app delete/reinstall and no longer needlessly consumes a license's device-registration slots. Existing IDs are automatically migrated from `UserDefaults`.
 
 ### Fixed
 
 #### Shared
 
 * EPUB HREFs that are not percent-encoded but carry a fragment or query (e.g. `chapter one.xhtml#section`, with a space in the filename) now keep their `#fragment`/`?query` instead of encoding the separators into the path. This fixes table of contents and Media Overlays links failing to resolve and navigate in poorly-authored EPUBs.
-* [#579](https://github.com/readium/swift-toolkit/issues/579) Reading a range past the end of a ZIP entry now returns the clamped bytes instead of failing, per the `Streamable` contract. `BufferingResource` also no longer extends its read-ahead past the end of the resource, which HTTP servers reject with a 416 error.
-* `ReadError.wrap()` now passes through errors that are already `ReadError`s, instead of obscuring them in a `.decoding` case. A new `ReadError.isCancellation` helper identifies errors caused by a cancelled task or HTTP request.
 
 #### Navigator
 
 * Fixed custom `EditingAction`s sometimes missing from the text-selection menu for double-tap (single word) selections (contributed by [@raphi011](https://github.com/readium/swift-toolkit/pull/822)).
 * Fixed memory leak in the `AudioNavigator`.
 * [#802](https://github.com/readium/swift-toolkit/issues/802) Fixed fonts declared with `fontFamilyDeclarations` never loading in the EPUB navigator. Font fetches were CORS-gated by WebKit (contributed by [@atani](https://github.com/readium/swift-toolkit/pull/845)).
-* [#579](https://github.com/readium/swift-toolkit/issues/579) The `AudioNavigator` now reports the `.loading` state while the player is stalled on an empty buffer, and forwards resource loading errors to `NavigatorDelegate.navigator(_:didFailToLoadResourceAt:withError:)` instead of swallowing them. It also keeps the current resource cached across loading requests, instead of re-downloading the beginning of a track whenever the player reissues a request.
-
-#### LCP
-
-* [#579](https://github.com/readium/swift-toolkit/issues/579) Streamed LCP audiobooks now start playing almost immediately. Resources encrypted with AES-CBC are decrypted and served in chunks, instead of being fully downloaded and decrypted upfront.
 
 
 ## [3.10.0] - 2026-06-24
@@ -1233,7 +1302,7 @@ progression. Now if no reading progression is set, the `effectiveReadingProgress
 * [Upgraded to Readium CSS 1.0.0-beta.1.](https://github.com/readium/r2-navigator-swift/pull/125)
   * Two new fonts are available: AccessibleDfa and IA Writer Duospace.
   * The file structure now follows strictly the one from [ReadiumCSS's `dist/`](https://github.com/readium/readium-css/tree/master/css/dist), for easy upgrades and custom builds replacement.
-      
+
 #### LCP
 
 * `LCPAuthenticating` can now return hashed passphrases in addition to clear ones. [This can be used by reading apps](https://github.com/readium/r2-lcp-swift/pull/75) fetching hashed passphrases from a web service or [Authentication for OPDS](https://readium.org/lcp-specs/notes/lcp-key-retrieval.html), for example.
@@ -1279,3 +1348,5 @@ progression. Now if no reading progression is set, the `effectiveReadingProgress
 [3.8.0]: https://github.com/readium/swift-toolkit/compare/3.7.0...3.8.0
 [3.9.0]: https://github.com/readium/swift-toolkit/compare/3.8.0...3.9.0
 [3.10.0]: https://github.com/readium/swift-toolkit/compare/3.9.0...3.10.0
+[3.11.0]: https://github.com/readium/swift-toolkit/compare/3.10.0...3.11.0
+[4.0.0-alpha.1]: https://github.com/readium/swift-toolkit/compare/3.11.0...4.0.0-alpha.1
