@@ -81,7 +81,7 @@ struct LCPDecryptionTests {
         try result.get()
 
         #expect(chunks.value.count > 1)
-        #expect(chunks.value.reduce(Data(), +) == clearData)Expand commentComment on lines R77 to R84Resolved
+        #expect(chunks.value.reduce(Data(), +) == clearData)
     }
 
     /// Cancelling the task stops the decryption loop, instead of streaming
