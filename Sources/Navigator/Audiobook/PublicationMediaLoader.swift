@@ -6,7 +6,6 @@
 
 import AVFoundation
 import Foundation
-import ReadiumInternal
 import ReadiumShared
 
 /// Serves `Publication`'s `Resource`s as an `AVURLAsset`.
@@ -19,6 +18,10 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
     }
 
     private let publication: Publication
+
+    /// Called when a resource failed to be served to the player, e.g. to
+    /// forward the error to the `NavigatorDelegate`.
+    var onLoadingError: ((AnyURL, ReadError) -> Void)?
 
     private let tasks = CancellableTasks()
 
@@ -64,6 +67,13 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
         else {
             return nil
         }
+
+        // Only the resources of other entries are evicted, as the player
+        // routinely abandons its requests to issue new ones for the same
+        // entry. Dropping the current resource would throw away its buffered
+        // data and force re-downloading the beginning of the entry.
+        resources = resources.filter { requests[$0.key] != nil }
+
         resources[href] = (link, resource)
         return (link, resource)
     }
@@ -100,8 +110,9 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
         let req = reqs.remove(at: index)
         req.task.cancel()
 
+        // The resource is intentionally kept in `resources`, to reuse its
+        // buffered data with the next loading requests for the same entry.
         if reqs.isEmpty {
-            resources.removeValue(forKey: href)
             requests.removeValue(forKey: href)
         } else {
             requests[href] = reqs
@@ -139,7 +150,7 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
         using resource: Resource,
         link: Link
     ) {
-        tasks.add {
+        tasks.add { [self] in
             infoRequest.isByteRangeAccessSupported = true
             infoRequest.contentType = link.mediaType?.uti
 
@@ -150,6 +161,7 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
 
             case let .failure(error):
                 log(.error, error)
+                report(error, forHREF: link.url())
                 request.finishLoading(with: error)
             }
         }
@@ -163,17 +175,24 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
             range = UInt64(dataRequest.currentOffset) ..< (UInt64(dataRequest.currentOffset) + UInt64(dataRequest.requestedLength))
         }
 
-        let task = Task {
+        let task = Task { [self] in
             let result = await resource.stream(
                 range: range,
                 consume: { dataRequest.respond(with: $0) }
             )
+
+            // The player abandons data requests regularly, e.g. when seeking.
+            // There's nothing to report or finish in this case.
+            guard !Task.isCancelled else {
+                return
+            }
 
             queue.async { [weak self] in
                 switch result {
                 case .success:
                     request.finishLoading()
                 case let .failure(error):
+                    self?.report(error, forHREF: link.url())
                     request.finishLoading(with: error)
                 }
 
@@ -182,6 +201,15 @@ final class PublicationMediaLoader: NSObject, AVAssetResourceLoaderDelegate, Log
         }
 
         registerRequest(request, task: task, for: link.url())
+    }
+
+    private func report(_ error: ReadError, forHREF href: AnyURL) {
+        // Cancellation is not an error worth reporting, it occurs whenever
+        // the player abandons a data request, e.g. when seeking.
+        if case .cancelled = error {
+            return
+        }
+        onLoadingError?(href, error)
     }
 
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader, didCancel loadingRequest: AVAssetResourceLoadingRequest) {
