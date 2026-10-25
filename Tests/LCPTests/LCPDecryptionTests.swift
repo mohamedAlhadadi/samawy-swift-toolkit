@@ -9,7 +9,6 @@ import PDFKit
 import ReadiumShared
 import ReadiumStreamer
 import Testing
-import TestPublications
 
 struct LCPDecryptionTests {
     let encryptedResource: Resource
@@ -21,6 +20,7 @@ struct LCPDecryptionTests {
 
         let service = LCPService(
             client: LCPTestClient(),
+            deviceName: "Test Device",
             licenseRepository: InMemoryLCPLicenseRepository(),
             passphraseRepository: InMemoryLCPPassphraseRepository(),
             assetRetriever: assetRetriever,
@@ -81,12 +81,12 @@ struct LCPDecryptionTests {
         try result.get()
 
         #expect(chunks.count > 1)
-        #expect(chunks.reduce(Data(), +) == clearData)
+        #expect(chunks.reduce(Data(), +) == clearData)Expand commentComment on lines R77 to R84Resolved
     }
 
     /// Cancelling the task stops the decryption loop, instead of streaming
     /// the remaining chunks.
-    @Test func cancellationStopsStreaming() async throws {
+    @Test func cancellationStopsStreaming() async {
         var chunks: [Data] = []
         let result = await encryptedResource.stream(range: 0 ..< UInt64(clearData.count)) { chunk in
             chunks.append(chunk)
