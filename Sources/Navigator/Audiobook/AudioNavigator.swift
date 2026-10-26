@@ -170,6 +170,15 @@ public final class AudioNavigator: Navigator, Configurable, AudioSessionUser, Lo
         return state
     }
 
+    /// Indicates whether the player is meant to be playing, even if it is
+       /// currently stalled waiting for data.
+       ///
+       /// Unlike `state`, this reflects the playback intent, which is what we
+       /// need to know when temporarily pausing the player to seek.
+       private var isPlaybackRequested: Bool {
+           player.timeControlStatus != .paused
+       }
+    
     /// Current playback info.
     public var playbackInfo: MediaPlaybackInfo {
         MediaPlaybackInfo(
@@ -246,7 +255,7 @@ public final class AudioNavigator: Navigator, Configurable, AudioSessionUser, Lo
 
     /// Seeks to the given time in the current resource.
     public func seek(to time: Double) async {
-        let wasPlaying = (state == .playing)
+        let wasPlaying = isPlaybackRequested
         pause()
 
         await player.seek(to: CMTime(seconds: time, preferredTimescale: 1000))
@@ -321,6 +330,7 @@ public final class AudioNavigator: Navigator, Configurable, AudioSessionUser, Lo
         }
 
         currentItemObserver = player.observe(\.currentItem, options: [.new, .old]) { [weak self] player, _ in
+                   let item = player.currentItem
             self?.observe(currentItem: player.currentItem)
             self?.playbackDidChange()
         }
@@ -471,7 +481,7 @@ public final class AudioNavigator: Navigator, Configurable, AudioSessionUser, Lo
     public private(set) var currentLocation: Locator?
 
     public func go(to locator: Locator, options: NavigatorGoOptions) async -> Bool {
-        let wasPlaying = (state == .playing)
+        let wasPlaying = isPlaybackRequested
         pause()
 
         guard let newResourceIndex = publication.readingOrder.firstIndexWithHREF(locator.href) else {
